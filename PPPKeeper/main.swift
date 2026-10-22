@@ -1,4 +1,5 @@
 import AppKit
+import ServiceManagement
 
 let supportDir = FileManager.default.homeDirectoryForCurrentUser
     .appendingPathComponent("Library/Application Support/PPPKeeper")
@@ -8,6 +9,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let statusLine = NSMenuItem(title: "Stopped", action: nil, keyEquivalent: "")
     let startItem = NSMenuItem(title: "Start", action: #selector(start), keyEquivalent: "s")
     let stopItem = NSMenuItem(title: "Stop", action: #selector(stop), keyEquivalent: "x")
+    let loginItem = NSMenuItem(title: "Open at Login", action: #selector(toggleLogin), keyEquivalent: "")
+    let autoItem = NSMenuItem(title: "Connect Automatically on Open", action: #selector(toggleAuto), keyEquivalent: "")
     var firstSeenConnected: Date?  // fallback when the status file has no timestamp
 
     func applicationDidFinishLaunching(_ n: Notification) {
@@ -17,6 +20,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(statusLine)
         menu.addItem(.separator())
         for i in [startItem, stopItem] { i.target = self; menu.addItem(i) }
+        menu.addItem(.separator())
+        for i in [loginItem, autoItem] { i.target = self; menu.addItem(i) }
         menu.addItem(.separator())
         let log = NSMenuItem(title: "Show Log", action: #selector(showLog), keyEquivalent: "l")
         log.target = self
@@ -29,6 +34,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in self?.refresh() }
         RunLoop.main.add(timer, forMode: .common)
         refresh()
+        if UserDefaults.standard.bool(forKey: "autoConnect") && !keeperRunning() { start() }
     }
 
     func keeperRunning() -> Bool {
@@ -63,6 +69,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusLine.title = text
         startItem.isEnabled = state == "stopped"
         stopItem.isEnabled = state != "stopped"
+        loginItem.state = SMAppService.mainApp.status == .enabled ? .on : .off
+        autoItem.state = UserDefaults.standard.bool(forKey: "autoConnect") ? .on : .off
     }
 
     @objc func start() {
@@ -78,6 +86,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func stop() {
         FileManager.default.createFile(atPath: supportDir.appendingPathComponent("stop").path, contents: nil)
+    }
+
+    @objc func toggleLogin() {
+        do {
+            if SMAppService.mainApp.status == .enabled { try SMAppService.mainApp.unregister() }
+            else { try SMAppService.mainApp.register() }
+        } catch {
+            let a = NSAlert()
+            a.messageText = "Couldn't change Open at Login"
+            a.informativeText = "\(error.localizedDescription)\n\nYou can add PPPKeeper in System Settings → General → Login Items instead."
+            NSApp.activate(ignoringOtherApps: true)
+            a.runModal()
+        }
+        refresh()
+    }
+
+    @objc func toggleAuto() {
+        let d = UserDefaults.standard
+        d.set(!d.bool(forKey: "autoConnect"), forKey: "autoConnect")
+        refresh()
     }
 
     @objc func showLog() {
